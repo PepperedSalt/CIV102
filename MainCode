@@ -231,14 +231,14 @@ def fos(capacity, demand):
 # FOS_shear = []
 # FOS_glue = []
 # FOS_shearbuck = []
-# 
+#
 # for x in range(1201):
 #     # Applied stresses from the envelopes
 #     sigma_top = Menv[x] * y_top / I                  # compression at the top fibre
 #     sigma_bot = Menv[x] * y_bot / I                  # tension at the bottom fibre
 #     tau_cent = Venv[x] * Qcentroid / (I * bcentroid)       # shear stress at the centroidal axis
 #     tau_glue = Venv[x] * Qglue / (I * bglue)       # shear stress in the glue
-# 
+#
 #     FOS_tens.append(fos(tens, sigma_bot))
 #     FOS_comp.append(fos(comp, sigma_top))
 #     FOS_buck1.append(fos(case1stress, sigma_top))
@@ -247,7 +247,7 @@ def fos(capacity, demand):
 #     FOS_shear.append(fos(shear, tau_cent))
 #     FOS_glue.append(fos(shearglue, tau_glue))
 #     FOS_shearbuck.append(fos(case4stress, tau_cent))
-# 
+#
 # results = [
 #     ("Tension", min(FOS_tens)),
 #     ("Compression", min(FOS_comp)),
@@ -258,7 +258,7 @@ def fos(capacity, demand):
 #     ("Glue shear", min(FOS_glue)),
 #     ("Shear buckling", min(FOS_shearbuck)),
 # ]
-# 
+#
 # print(results)
 
 
@@ -383,10 +383,10 @@ for H in (80, 100, 120, 140, 160, 180):          # track height must be a multip
     for ntop in (1, 2, 3):                       # number of 1.27 mm layers
         for nbot in (1, 2):
             for nweb in (1, 2):
-                for topw in range(80, 150, 1):
-                    for bottomw in range(50, 80, 1):
+                for topw in range(80, 150, 2):
+                    for bottomw in range(50, 80, 2):
                         for tab in range(5, 10, 1): # tab width beyond the web
-                            for diaphragm in range(50, 400, 1):
+                            for diaphragm in range(50, 400, 10):
                                 topt = ntop * t
                                 bottomt = nbot * t
                                 webt = nweb * t
