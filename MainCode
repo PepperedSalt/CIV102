@@ -1,0 +1,419 @@
+from math import pi, ceil
+
+## Cross-sectional Calculations
+# Top flange
+topt = 1.27
+topw = 100
+
+# Bottom flange
+bottomt = 1.27
+bottomw = 80
+
+# Webs
+webt = 1.27
+webh = 75
+
+# Glue Tabs
+gluew = 5
+tabw = gluew - webt # glue tab width beyond the web
+
+# Matboard
+t = 1.27
+E = 4000
+tens = 30
+comp = 6
+shear = 4
+shearglue = 2
+poisson = 0.2
+
+# Calculations
+
+# Parts list to store 4 objects (top and bottom flange, glue tabs, and webs)
+parts = [
+    (topw, bottomt + webh, bottomt + webh + topt), # top flange
+    (2*tabw, bottomt + webh - t, bottomt + webh), # two glue tabs
+    (2*webt, bottomt, bottomt + webh), # two webs
+    (bottomw, 0, bottomt), # bottom flange
+]
+
+ybar = (
+    # Top flange
+    topw*topt*(bottomt+webh+topt/2)
+    # Two glue tabs
+    + 2* t*tabw*(bottomt+webh-t/2)
+    # Two webs
+    + 2* webh*webt*(bottomt+webh/2)
+    # Bottom flange
+    + bottomw*bottomt*bottomt/2
+) / ( # Total area
+    topw*topt
+    + 2* t*tabw
+    + 2* webh*webt
+    + bottomw*bottomt
+)
+
+H = topt + webh + bottomt # overall height
+y_top = H - ybar # distance from centroid to the top
+y_bot = ybar # distance from centroid to the bottom
+
+# Centroid heights from the bottom
+y_topfl = bottomt + webh + topt/2
+y_tab   = bottomt + webh - t/2
+y_web   = bottomt + webh/2
+y_botfl = bottomt/2
+
+I = (
+    # Top flange
+    topw*topt**3/12 + topw*topt*(y_topfl - ybar)**2
+    # Two glue tabs
+    + 2*(tabw*t**3/12 + tabw*t*(y_tab - ybar)**2)
+    # Two webs
+    + 2*(webt*webh**3/12 + webt*webh*(y_web - ybar)**2)
+    # Bottom flange
+    + bottomw*bottomt**3/12 + bottomw*bottomt*(y_botfl - ybar)**2
+)
+
+# Function to determine Q for some given y above the bottom
+def Q(y):
+    total = 0
+    for w, y0, y1 in parts:
+        lo = max(y0, y) # bottom of the part above the cut
+        if y1 > lo:
+            total += w * (y1 - lo) * ((lo + y1)/2 - ybar) # Adds the area term times the distance from the piece's centroid to ybar
+    return total
+
+# Function to determine b for some given y above the bottom
+def b(y):
+    below = 0 # width of pieces that end at or above y (the side below the cut)
+    above = 0 # width of pieces that start at or below y (the side above the cut)
+
+    for w, y0, y1 in parts: # looks through all parts of the cross section
+        if y0 < y <= y1: # piece reaches y from below
+            below = below + w
+        if y0 <= y < y1: # piece reaches y from above
+            above = above + w
+
+    if below > 0 and above > 0:
+        return min(below, above) # at a boundary, take the narrower side
+    return below + above # one of them is zero
+
+## FBD, SFD, and BMD calculations
+# Forces (vertical)
+Ay = 0
+By = 0
+start = -0 # run from -856 to 1200 to simulate train moving
+distribution = (0, 176, 340, 516, 680, 856)
+locations = list(distribution)
+
+for i in range(len(locations)):
+    locations[i] += start
+
+# Train weights
+# middlefreight = 1
+# rightfreight = 1.1 * middlefreight
+# locamotive = 1.39 * rightfreight
+
+middlefreight = 400/3
+rightfreight = 400/3
+locamotive = 400/3
+
+loads = (locamotive/2, locamotive/2, middlefreight/2, middlefreight/2, rightfreight/2, rightfreight/2)
+
+
+# Reaction force calculations
+sumWeight = 0 # weight accumulator
+sumMoments = 0 # moment accumulator
+for i in range(len(locations)):
+    if 0 <= locations[i] <= 1200: # If the load is on the beam
+        sumMoments += locations[i] * loads[i] # adding the moment to accumulator
+        sumWeight += loads[i] # adding the weight to accumulator
+
+By = sumMoments / 1200
+Ay = sumWeight - By
+
+# SFD - function returns the shear force at some x mm from the left
+def v(x): # v in range 0 to 1200
+    shear = Ay # starts from left reaction force
+    appliedload = 0 # accumulator for loads to apply
+    for i in range(len(locations)): # looks at all loads
+        if 0 <= locations[i] <= x: # if x is past the location of the load and the load is on the beam
+            appliedload += loads[i] # apply the load
+    shear -= appliedload # subtract the applied load
+    return shear
+
+# BMD - function returns the moment at some x mm from the left
+def m(x): # m in range 0 to 1200
+    moment = Ay * x # moment from the left reaction force acting at distance x
+    for i in range(len(locations)): # looks at all loads
+        if 0 <= locations[i] <= x: # if x is past the location of the load and the load is on the beam
+            moment -= loads[i] * (x - locations[i]) # subtract the load times its lever arm (distance from the load to x)
+    return moment
+
+## Safety calculations
+diaphragm = 1 # a - diaphragm spacing (mm)
+overhang = (topw-bottomw)/2 # overhang on top (mm)
+topmid = bottomw - 2*webt # middle part on top flange between webs (mm)
+yglue = bottomt+webh # location of the glue tabs from the bottom (mm)
+
+## Buckling limits
+k_plate = pi**2 * E / (12 * (1 - poisson**2)) # common factor, multiply by k and additional factors for cases 1, 2, and 3:
+
+case1stress = 4 * k_plate * (topt/topmid) ** 2
+case2stress = 0.425 * k_plate * (topt/overhang)**2
+
+# Case 3:
+webb = y_top - topt # distance from centroid to top flange (case 3 buckling b)
+case3stress = 6 * k_plate * (webt/webb)**2
+
+case4stress = 5 * k_plate * ((webt/webh)**2 + (webt/diaphragm)**2)
+
+## Shear stress limits
+Qcentroid = Q(ybar)
+bcentroid = b(ybar)
+Qglue = Q(yglue)
+bglue = b(yglue)
+
+## Simulation to allow train to "move" across the bridge
+# Same logic as calculations above
+def set_train(start, train_loads):
+    global locations, loads, Ay, By
+
+    loads = train_loads
+    locations = list(distribution)
+    for i in range(len(locations)):
+        locations[i] += start
+
+    sumWeight = 0
+    sumMoments = 0
+
+    for i in range(len(locations)):
+        if 0 <= locations[i] <= 1200:
+            sumMoments += locations[i] * loads[i]
+            sumWeight += loads[i]
+
+    By = sumMoments / 1200
+    Ay = sumWeight - By
+
+## Envelopes to store largest V and M at every x over the train positions
+Venv = [0] * 1201
+Menv = [0] * 1201
+original_loads = loads
+
+for start in range(-856, 1201): # beginning simulation for every starting value (-856 to 1201, increment of 1mm)
+    set_train(start, original_loads)
+    for x in range(1201): # runs train for 1200 mm
+        V = abs(v(x)) # Calculates max v (absolute, dont care about sign)
+        M = m(x) # Calculates max m, sign matters
+        if V > Venv[x]: # if shear is greater than the current max
+            Venv[x] = V # update
+        if M > Menv[x]: # if moment is greater than the current max
+            Menv[x] = M # update
+
+print(max(Menv))
+print(Menv.index(max(Menv)))
+
+print(max(Venv))
+print(Venv.index(max(Venv)))
+
+## Helper to return fos based on capacity and demand stresses
+def fos(capacity, demand):
+    if demand <= 0:
+        return 1e9
+    return capacity / demand
+
+## FOS along the span, index n = nmm from the left
+# Envelopes for FOS along the span, each FOS is for the respective run
+# FOS_tens = []
+# FOS_comp = []
+# FOS_buck1 = []
+# FOS_buck2 = []
+# FOS_buck3 = []
+# FOS_shear = []
+# FOS_glue = []
+# FOS_shearbuck = []
+# 
+# for x in range(1201):
+#     # Applied stresses from the envelopes
+#     sigma_top = Menv[x] * y_top / I                  # compression at the top fibre
+#     sigma_bot = Menv[x] * y_bot / I                  # tension at the bottom fibre
+#     tau_cent = Venv[x] * Qcentroid / (I * bcentroid)       # shear stress at the centroidal axis
+#     tau_glue = Venv[x] * Qglue / (I * bglue)       # shear stress in the glue
+# 
+#     FOS_tens.append(fos(tens, sigma_bot))
+#     FOS_comp.append(fos(comp, sigma_top))
+#     FOS_buck1.append(fos(case1stress, sigma_top))
+#     FOS_buck2.append(fos(case2stress, sigma_top))
+#     FOS_buck3.append(fos(case3stress, sigma_top))
+#     FOS_shear.append(fos(shear, tau_cent))
+#     FOS_glue.append(fos(shearglue, tau_glue))
+#     FOS_shearbuck.append(fos(case4stress, tau_cent))
+# 
+# results = [
+#     ("Tension", min(FOS_tens)),
+#     ("Compression", min(FOS_comp)),
+#     ("Flange buckling (between webs)", min(FOS_buck1)),
+#     ("Flange buckling (overhangs)", min(FOS_buck2)),
+#     ("Web flexural buckling", min(FOS_buck3)),
+#     ("Shear", min(FOS_shear)),
+#     ("Glue shear", min(FOS_glue)),
+#     ("Shear buckling", min(FOS_shearbuck)),
+# ]
+# 
+# print(results)
+
+
+## ---------------- Design optimization ----------------
+
+# Largest demands over every train position (valid because the section is uniform:
+# every FOS is proportional to 1/M or 1/V, so the minimum FOS sits at the largest M and V)
+Mmax = 0
+Vmax = 0
+for x in range(1201):
+    if Menv[x] > Mmax:
+        Mmax = Menv[x]
+    if Venv[x] > Vmax:
+        Vmax = Venv[x]
+
+# Versions of Q and b that take the section as an input, so they work for any trial design
+def Q_trial(y, plist, yb):
+    total = 0
+    for w, y0, y1 in plist:
+        lo = max(y0, y)
+        if y1 > lo:
+            total += w * (y1 - lo) * ((lo + y1)/2 - yb)
+    return total
+
+def b_trial(y, plist):
+    below = 0
+    above = 0
+    for w, y0, y1 in plist:
+        if y0 < y <= y1:
+            below = below + w
+        if y0 <= y < y1:
+            above = above + w
+    if below > 0 and above > 0:
+        return min(below, above)
+    return below + above
+
+# Minimum FOS and governing mode for ANY trial geometry (same formulas as before)
+def analyze(topt, topw, bottomt, bottomw, webt, webh, gluew, diaphragm):
+    tabw = gluew - webt
+    parts = [
+        (topw, bottomt + webh, bottomt + webh + topt),
+        (2*tabw, bottomt + webh - t, bottomt + webh),
+        (2*webt, bottomt, bottomt + webh),
+        (bottomw, 0, bottomt),
+    ]
+    area = topw*topt + 2*t*tabw + 2*webh*webt + bottomw*bottomt
+    ybar = (topw*topt*(bottomt+webh+topt/2) + 2*t*tabw*(bottomt+webh-t/2)
+            + 2*webh*webt*(bottomt+webh/2) + bottomw*bottomt*bottomt/2) / area
+    H = topt + webh + bottomt
+    y_top = H - ybar
+    y_bot = ybar
+    y_topfl = bottomt + webh + topt/2
+    y_tab = bottomt + webh - t/2
+    y_web = bottomt + webh/2
+    y_botfl = bottomt/2
+    I = (topw*topt**3/12 + topw*topt*(y_topfl - ybar)**2
+         + 2*(tabw*t**3/12 + tabw*t*(y_tab - ybar)**2)
+         + 2*(webt*webh**3/12 + webt*webh*(y_web - ybar)**2)
+         + bottomw*bottomt**3/12 + bottomw*bottomt*(y_botfl - ybar)**2)
+
+    overhang = (topw - bottomw)/2
+    clearw = bottomw - 2*webt
+    y_glue = bottomt + webh
+    k_plate = pi**2 * E / (12 * (1 - poisson**2))
+
+    # applied stresses at the largest M and V
+    sigma_top = Mmax * y_top / I
+    sigma_bot = Mmax * y_bot / I
+    tau_cent = Vmax * Q_trial(ybar, parts, ybar) / (I * b_trial(ybar, parts))
+    tau_glue = Vmax * Q_trial(y_glue, parts, ybar) / (I * b_trial(y_glue, parts))
+
+    # capacities
+    sigma_buck1 = 4 * k_plate * (topt/clearw)**2
+    if overhang > 0:
+        sigma_buck2 = 0.425 * k_plate * (topt/overhang)**2
+    else:
+        sigma_buck2 = 1e9                       # no overhang, so no overhang buckling
+    sigma_buck3 = 6 * k_plate * (webt/(y_top - topt))**2
+    tau_buck = 5 * k_plate * ((webt/webh)**2 + (webt/diaphragm)**2)
+
+    results = [
+        ("Tension", tens/sigma_bot),
+        ("Compression", comp/sigma_top),
+        ("Flange buckling (between webs)", sigma_buck1/sigma_top),
+        ("Flange buckling (overhangs)", sigma_buck2/sigma_top),
+        ("Web flexural buckling", sigma_buck3/sigma_top),
+        ("Shear", shear/tau_cent),
+        ("Glue shear", shearglue/tau_glue),
+        ("Shear buckling", tau_buck/tau_cent),
+    ]
+    minFOS = 1e9
+    failmode = ""
+    for name, value in results:
+        if value < minFOS:
+            minFOS = value
+            failmode = name
+    return minFOS, failmode
+
+# Matboard needed (mm^2 of sheet) for a trial design
+bridge_length = 1250        # mm, minimum allowed length
+splice_overlap = 50         # mm, overlap added to every strip (the sheet is only 1016 mm long)
+sheet_area = 813 * 1016     # mm^2
+usable = 0.85               # fraction of the sheet you can realistically use (cuts, mistakes)
+
+def material_area(topt, topw, bottomt, bottomw, webt, webh, gluew, diaphragm):
+    tabw = gluew - webt
+    clearw = bottomw - 2*webt
+    # total width of all strips: every 1.27 mm layer is its own strip
+    stripwidths = topw*(topt/t) + bottomw*(bottomt/t) + 2*webh*(webt/t) + 2*tabw
+    area = stripwidths * (bridge_length + splice_overlap)
+    n_dia = ceil(1200/diaphragm) + 1             # diaphragms, including the two at the supports
+    area += n_dia * clearw * webh                # one layer each
+    return area, stripwidths
+
+total_train = 0
+for w in original_loads:
+    total_train += w
+mass_per_mm2 = 750 / sheet_area                  # grams per mm^2 of matboard (about 750 g per sheet)
+
+candidates = []
+for H in (80, 100, 120, 140, 160, 180):          # track height must be a multiple of 20 mm
+    for ntop in (1, 2, 3):                       # number of 1.27 mm layers
+        for nbot in (1, 2):
+            for nweb in (1, 2):
+                for topw in range(80, 150, 1):
+                    for bottomw in range(50, 80, 1):
+                        for tab in range(5, 10, 1): # tab width beyond the web
+                            for diaphragm in range(50, 400, 1):
+                                topt = ntop * t
+                                bottomt = nbot * t
+                                webt = nweb * t
+                                webh = H - topt - bottomt
+                                gluew = webt + tab
+                                if bottomw - 2*webt <= 0 or bottomw > topw:
+                                    continue
+                                area, stripwidths = material_area(topt, topw, bottomt, bottomw, webt, webh, gluew, diaphragm)
+                                if area > usable * sheet_area:
+                                    continue                     # not enough matboard
+                                if stripwidths > 813:
+                                    continue                     # strips would not fit across the 813 mm width
+                                minFOS, failmode = analyze(topt, topw, bottomt, bottomw, webt, webh, gluew, diaphragm)
+                                Pfail = minFOS * total_train
+                                mass = area * mass_per_mm2
+                                candidates.append((Pfail, Pfail/mass, minFOS, failmode, mass, H, ntop, nbot, nweb, topw, bottomw, tab, diaphragm))
+
+# Best by failure load, then best by strength-to-weight
+candidates.sort(key=lambda c: c[0], reverse=True)   # key says which entry to sort by
+print("Top 5 by failure load:")
+for c in candidates[0:5]:
+    print(round(c[0]), "N | S/W", round(c[1], 2), "| FOS", round(c[2], 2), c[3], "| mass", round(c[4]), "g | H", c[5], "layers top/bot/web", c[6], c[7], c[8], "topw", c[9], "botw", c[10], "tab", c[11], "dia", c[12])
+
+candidates.sort(key=lambda c: c[1], reverse=True)
+print("Top 5 by strength-to-weight:")
+for c in candidates[0:5]:
+    print(round(c[0]), "N | S/W", round(c[1], 2), "| FOS", round(c[2], 2), c[3], "| mass", round(c[4]), "g | H", c[5], "layers top/bot/web", c[6], c[7], c[8], "topw", c[9], "botw", c[10], "tab", c[11], "dia", c[12])
+
+print("Done")
+
